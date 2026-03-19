@@ -24,6 +24,13 @@ class PostUpdate(BaseModel):
     media: list["PostMedia"] | None = None
 
 
+class PostQuoteCreate(BaseModel):
+    content: str = Field(min_length=1)
+    connected_account_id: uuid.UUID | None = None
+    scheduled_for: datetime | None = None
+    media: list["PostMedia"] | None = None
+
+
 class PostMedia(BaseModel):
     key: str = Field(min_length=1)
     public_url: str = Field(min_length=1)
@@ -45,10 +52,21 @@ class PostRead(BaseModel):
     scheduled_for: datetime | None
     published_at: datetime | None
     platform_post_id: str | None
+    reposted_at: datetime | None
+    quote_of_platform_post_id: str | None
     error_message: str | None
     media_keys: list[str] | None
     media: list[PostMedia] | None
+    is_deleted: bool
+    deleted_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PostActionResult(BaseModel):
+    success: bool = True
+    message: str
+    post_id: uuid.UUID
+    platform_post_id: str | None = None

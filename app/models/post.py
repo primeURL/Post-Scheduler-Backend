@@ -47,9 +47,13 @@ class Post(Base):
     )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     platform_post_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reposted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quote_of_platform_post_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     media_keys: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     media: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

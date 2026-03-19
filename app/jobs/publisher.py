@@ -30,6 +30,7 @@ async def publish_due_posts() -> None:
             update(Post)
             .where(
                 Post.status == PostStatus.scheduled,
+                Post.is_deleted.is_(False),
                 Post.scheduled_for <= datetime.now(timezone.utc),
             )
             .values(status=PostStatus.publishing)
@@ -97,7 +98,13 @@ async def _publish_one(post_id) -> None:
 
             media_ids = await _resolve_media_ids(post, api)
 
-            if reply_to_id:
+            if post.quote_of_platform_post_id:
+                platform_post_id = await api.create_quote(
+                    post.content,
+                    post.quote_of_platform_post_id,
+                    media_ids,
+                )
+            elif reply_to_id:
                 platform_post_id = await api.create_reply(post.content, reply_to_id, media_ids)
             else:
                 platform_post_id = await api.create_post(post.content, media_ids)

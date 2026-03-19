@@ -76,6 +76,47 @@ class XApiService:
             _raise_for_x_status(resp)
             return resp.json()["data"]["id"]
 
+    async def create_quote(
+        self,
+        content: str,
+        quote_tweet_id: str,
+        media_ids: list[str] | None = None,
+    ) -> str:
+        """Create a quote post and return the new post ID."""
+        body: dict = {
+            "text": content,
+            "quote_tweet_id": quote_tweet_id,
+        }
+        if media_ids:
+            body["media"] = {"media_ids": media_ids}
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{_V2_BASE}/tweets",
+                json=body,
+                headers=self._auth_header,
+            )
+            _raise_for_x_status(resp)
+            return resp.json()["data"]["id"]
+
+    async def repost(self, user_id: str, tweet_id: str) -> None:
+        """Repost a tweet as the authenticated user."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{_V2_BASE}/users/{user_id}/retweets",
+                json={"tweet_id": tweet_id},
+                headers=self._auth_header,
+            )
+            _raise_for_x_status(resp)
+
+    async def undo_repost(self, user_id: str, tweet_id: str) -> None:
+        """Undo an existing repost for a tweet as the authenticated user."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.delete(
+                f"{_V2_BASE}/users/{user_id}/retweets/{tweet_id}",
+                headers=self._auth_header,
+            )
+            _raise_for_x_status(resp)
+
     async def upload_media(self, file_bytes: bytes, mime_type: str) -> str:
         """Upload media and return the media ID used by create_post/create_reply."""
         media_category = _media_category_for_type(mime_type)
@@ -156,6 +197,8 @@ class XApiService:
             "likes": pub.get("like_count", 0),
             "retweets": pub.get("retweet_count", 0),
             "replies": pub.get("reply_count", 0),
+            "quoted_count": pub.get("quote_count", 0),
+            "bookmarks": pub.get("bookmark_count", 0),
             "clicks": priv.get("url_link_clicks", 0),
             "profile_visits": priv.get("user_profile_clicks", 0),
         }

@@ -25,5 +25,7 @@ class PostAnalytics(Base):
     likes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     retweets: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     replies: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    quoted_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    bookmarks: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     clicks: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     profile_visits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

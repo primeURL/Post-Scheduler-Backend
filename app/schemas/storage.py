@@ -16,3 +16,9 @@ class UploadUrlResponse(BaseModel):
     content_type: str
     expires_in: int
     user_id: uuid.UUID
+
+
+class DownloadUrlResponse(BaseModel):
+    download_url: str
+    file_key: str
+    expires_in: int

@@ -32,6 +32,7 @@ async def fetch_published_analytics() -> None:
             .join(ConnectedAccount, Post.connected_account_id == ConnectedAccount.id)
             .where(
                 Post.status == PostStatus.published,
+                Post.is_deleted.is_(False),
                 Post.platform_post_id.is_not(None),
                 Post.published_at >= cutoff,
             )
@@ -49,6 +50,9 @@ async def fetch_published_analytics() -> None:
 
 async def _save_snapshot(post: Post, account: ConnectedAccount) -> None:
     """Fetch metrics for one post and write a PostAnalytics snapshot."""
+    if post.is_deleted:
+        return
+
     try:
         access_token = decrypt_token(account.access_token_enc)
         api = XApiService(access_token=access_token)
@@ -64,6 +68,8 @@ async def _save_snapshot(post: Post, account: ConnectedAccount) -> None:
             likes=metrics["likes"],
             retweets=metrics["retweets"],
             replies=metrics["replies"],
+            quoted_count=metrics["quoted_count"],
+            bookmarks=metrics["bookmarks"],
             clicks=metrics["clicks"],
             profile_visits=metrics["profile_visits"],
         )
