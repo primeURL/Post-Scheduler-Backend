@@ -1,16 +1,20 @@
-"""X API v2 service — posting, thread replies, media upload (v1.1), analytics."""
+"""X API v2 service — posting, media upload, and analytics."""
 from __future__ import annotations
+
+import asyncio
 
 import httpx
 
 from app.core.config import settings
 
-_V2_BASE = "https://api.twitter.com/2"
-_V1_UPLOAD = "https://upload.twitter.com/1.1/media/upload.json"
+_V2_BASE = "https://api.x.com/2"
+_MEDIA_UPLOAD = f"{_V2_BASE}/media/upload"
+_UPLOAD_CHUNK_SIZE = 1024 * 1024
+_MAX_STATUS_POLLS = 30
 
 
 class XApiService:
-    """Async wrapper around X API v2 (v1.1 for media upload).
+    """Async wrapper around X API v2.
 
     Two ways to instantiate:
     - ``XApiService(user_access_token)`` — user context; can post + read all metrics.
@@ -73,16 +77,53 @@ class XApiService:
             return resp.json()["data"]["id"]
 
     async def upload_media(self, file_bytes: bytes, mime_type: str) -> str:
-        """Upload media via the v1.1 endpoint.  Returns the ``media_id_string``."""
-        # multipart/form-data — exclude Content-Type; httpx sets it automatically.
+        """Upload media and return the media ID used by create_post/create_reply."""
+        media_category = _media_category_for_type(mime_type)
+
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                _V1_UPLOAD,
+                _MEDIA_UPLOAD,
                 headers=self._auth_header,
-                files={"media": (None, file_bytes, mime_type)},
+                data={"media_category": media_category},
+                files={"media": ("upload", file_bytes, mime_type)},
             )
             _raise_for_x_status(resp)
-            return resp.json()["media_id_string"]
+            media_id = _extract_media_id(resp.json())
+
+            processing_info = _extract_processing_info(resp.json())
+            if processing_info:
+                await self._wait_for_media_processing(client, media_id, processing_info)
+            return media_id
+
+    async def _wait_for_media_processing(
+        self,
+        client: httpx.AsyncClient,
+        media_id: str,
+        processing_info: dict,
+    ) -> None:
+        info = processing_info
+        for _ in range(_MAX_STATUS_POLLS):
+            state = info.get("state")
+            if state == "succeeded":
+                return
+            if state == "failed":
+                error = info.get("error") or {}
+                message = error.get("message") or "Media processing failed"
+                raise RuntimeError(message)
+
+            await asyncio.sleep(max(int(info.get("check_after_secs", 1)), 1))
+            status_resp = await client.get(
+                _MEDIA_UPLOAD,
+                headers=self._auth_header,
+                params={
+                    "command": "STATUS",
+                    "media_id": media_id,
+                },
+            )
+            _raise_for_x_status(status_resp)
+            info = status_resp.json()["data"].get("processing_info") or {"state": "succeeded"}
+
+        raise RuntimeError("Timed out while waiting for X media processing")
 
     async def get_tweet_metrics(self, tweet_id: str) -> dict:
         """Return engagement metrics for a tweet.
@@ -132,3 +173,41 @@ def _raise_for_x_status(resp: httpx.Response) -> None:
             request=resp.request,
             response=resp,
         )
+
+
+def _media_category_for_type(mime_type: str) -> str:
+    normalized = mime_type.lower()
+    if normalized == "image/gif":
+        return "tweet_gif"
+    if normalized.startswith("video/"):
+        return "tweet_video"
+    return "tweet_image"
+
+
+def _extract_media_id(payload: dict) -> str:
+    """Support both v2 and compatibility response shapes."""
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(data, dict):
+        if data.get("id"):
+            return str(data["id"])
+        if data.get("media_id"):
+            return str(data["media_id"])
+    if isinstance(payload, dict):
+        if payload.get("media_id_string"):
+            return str(payload["media_id_string"])
+        if payload.get("media_id"):
+            return str(payload["media_id"])
+    raise RuntimeError(f"X media upload response missing media id: {payload}")
+
+
+def _extract_processing_info(payload: dict) -> dict | None:
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(data, dict):
+        info = data.get("processing_info")
+        if isinstance(info, dict):
+            return info
+    if isinstance(payload, dict):
+        info = payload.get("processing_info")
+        if isinstance(info, dict):
+            return info
+    return None

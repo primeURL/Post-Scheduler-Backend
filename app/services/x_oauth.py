@@ -1,4 +1,4 @@
-"""X (Twitter) OAuth 2.0 PKCE — authorization URL, code exchange, user info."""
+"""X OAuth 2.0 PKCE helpers for authorization, token exchange, and refresh."""
 import base64
 import hashlib
 import secrets
@@ -8,11 +8,12 @@ import httpx
 
 from app.core.config import settings
 
-_AUTH_URL = "https://twitter.com/i/oauth2/authorize"
-_TOKEN_URL = "https://api.twitter.com/2/oauth2/token"
-_USERINFO_URL = "https://api.twitter.com/2/users/me"
+_AUTH_URL = "https://x.com/i/oauth2/authorize"
+_TOKEN_URL = "https://api.x.com/2/oauth2/token"
+_USERINFO_URL = "https://api.x.com/2/users/me"
 
-SCOPES = "tweet.read tweet.write users.read offline.access"
+# media.write is required to upload media before creating tweets with attachments.
+SCOPES = "tweet.read tweet.write users.read offline.access media.write"
 
 
 def generate_pkce_pair() -> tuple[str, str]:
@@ -36,6 +37,7 @@ def build_authorization_url(state: str, code_challenge: str) -> str:
         "state": state,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
+        "force_login": "true",
     }
     return _AUTH_URL + "?" + urlencode(params)
 
@@ -58,12 +60,27 @@ async def exchange_code(code: str, code_verifier: str) -> dict:
         return resp.json()
 
 
+async def refresh_access_token(refresh_token: str) -> dict:
+    """Exchange a refresh token for a fresh access token."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            _TOKEN_URL,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            },
+            auth=(settings.x_client_id, settings.x_client_secret),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 async def get_user_info(access_token: str) -> dict:
-    """Return X user object with keys ``id``, ``name``, ``username``."""
+    """Return X user object with keys ``id``, ``name``, ``username``, ``subscription_type``, ``profile_image_url``."""
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             _USERINFO_URL,
-            params={"user.fields": "id,name,username"},
+            params={"user.fields": "id,name,username,subscription_type,profile_image_url"},
             headers={"Authorization": f"Bearer {access_token}"},
         )
         resp.raise_for_status()

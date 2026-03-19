@@ -1,15 +1,17 @@
-"""Authentication routes: Google OAuth 2.0 + JWT session management."""
+"""Authentication routes: Google OAuth 2.0 + Firebase ID-token flow."""
 import secrets
 from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.firebase import verify_id_token
 from app.core.limiter import limiter
 from app.core.security import (
     create_access_token,
@@ -29,6 +31,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _REFRESH_COOKIE = "refresh_token"
 _CSRF_COOKIE = "csrf_token"
 _COOKIE_SECURE = settings.app_env == "production"
+
+
+class _FirebaseLoginRequest(BaseModel):
+    id_token: str
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +160,38 @@ async def google_callback(
     _set_auth_cookies(redirect, refresh_token, csrf_token)
     redirect.delete_cookie("oauth_state")
     return redirect
+
+
+@router.post("/firebase", response_model=TokenResponse)
+@limiter.limit("20/minute")
+async def firebase_login(
+    request: Request,
+    response: Response,
+    body: _FirebaseLoginRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Verify a Firebase ID token, upsert the user, and issue a session."""
+    try:
+        claims = await verify_id_token(body.id_token)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Firebase token")
+
+    google_sub: str = claims["uid"]
+    email: str = claims.get("email", "")
+    name: str = claims.get("name", email)
+    avatar_url: str | None = claims.get("picture")
+
+    user = await _upsert_user(db, google_sub=google_sub, email=email, name=name, avatar_url=avatar_url)
+
+    refresh_token = generate_refresh_token()
+    csrf_token = generate_csrf_token()
+    await _create_session(db, user, refresh_token)
+
+    access_token = create_access_token(user.id, user.email)
+    _set_auth_cookies(response, refresh_token, csrf_token)
+
+    expire_seconds = settings.jwt_access_expire_minutes * 60
+    return {"access_token": access_token, "token_type": "bearer", "expires_in": expire_seconds}
 
 
 @router.post("/refresh", response_model=TokenResponse)

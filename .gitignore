@@ -7,7 +7,7 @@ __pycache__/
 *.so
 
 # Firebase
-firebase-service-account-*.json
+post-scheduler*.json
 
 # Distribution / packaging
 .Python

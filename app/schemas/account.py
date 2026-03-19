@@ -10,6 +10,8 @@ class ConnectedAccountRead(BaseModel):
     platform_user_id: str
     platform_username: str
     scopes: str | None
+    subscription_type: str | None
+    avatar_url: str | None
     token_expires_at: datetime | None
     created_at: datetime
     updated_at: datetime

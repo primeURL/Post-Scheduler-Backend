@@ -40,8 +40,21 @@ class Settings(BaseSettings):
     # App-only Bearer Token — fetch public tweet metrics without a user token
     x_bearer_token: str = ""
 
+    # --- Firebase Admin SDK ---
+    # Path to service-account JSON, relative to the working directory (backend/)
+    firebase_sa_path: str = "post-scheduler-sa-dev.json"
+
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"
+
+    # --- Cloudflare R2 ---
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_region: str = "auto"
+    r2_bucket_name: str = ""
+    r2_public_base_url: str = ""
+    r2_upload_url_expiry_seconds: int = 900
 
     model_config = SettingsConfigDict(
         env_file=".env",

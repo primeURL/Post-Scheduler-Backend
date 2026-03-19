@@ -7,17 +7,30 @@ from app.models.post import PostStatus
 
 
 class PostCreate(BaseModel):
-    platform: str = Field(min_length=2, max_length=50)
+    connected_account_id: uuid.UUID | None = None
+    platform: str = Field(min_length=1, max_length=50)
     content: str = Field(min_length=1)
     scheduled_for: datetime | None = None
     thread_id: uuid.UUID | None = None
     thread_order: int | None = None
+    media: list["PostMedia"] | None = None
 
 
 class PostUpdate(BaseModel):
+    connected_account_id: uuid.UUID | None = None
     content: str | None = Field(default=None, min_length=1)
     scheduled_for: datetime | None = None
     status: PostStatus | None = None
+    media: list["PostMedia"] | None = None
+
+
+class PostMedia(BaseModel):
+    key: str = Field(min_length=1)
+    public_url: str = Field(min_length=1)
+    type: str = Field(min_length=1, max_length=50)
+    content_type: str | None = Field(default=None, min_length=1, max_length=255)
+    file_name: str | None = Field(default=None, min_length=1, max_length=255)
+    size: int | None = Field(default=None, ge=1)
 
 
 class PostRead(BaseModel):
@@ -34,6 +47,7 @@ class PostRead(BaseModel):
     platform_post_id: str | None
     error_message: str | None
     media_keys: list[str] | None
+    media: list[PostMedia] | None
     created_at: datetime
     updated_at: datetime
 

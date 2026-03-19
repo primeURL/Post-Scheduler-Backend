@@ -1,6 +1,7 @@
 fastapi==0.115.12
 uvicorn[standard]==0.34.0
 sqlalchemy==2.0.40
+greenlet==3.2.4
 alembic==1.15.1
 pydantic-settings==2.8.1
 asyncpg==0.30.0
@@ -11,3 +12,5 @@ httpx==0.28.1
 slowapi==0.1.9
 redis[asyncio]==5.2.1
 apscheduler==3.10.4
+firebase-admin==6.6.0
+boto3==1.38.10
