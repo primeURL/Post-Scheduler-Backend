@@ -3,6 +3,7 @@ import time
 import uuid
 from collections import deque
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from redis.exceptions import RedisError
 from sqlalchemy import and_, func, select
@@ -28,6 +29,20 @@ _MANUAL_REFRESH_USER_LIMIT = 12
 
 _fallback_post_cooldowns: dict[str, float] = {}
 _fallback_user_hits: dict[str, deque[float]] = {}
+
+
+def _raise_mapped_x_error(exc: httpx.HTTPStatusError) -> None:
+    """Map upstream X API failures to client-safe HTTP errors."""
+    if exc.response.status_code == status.HTTP_401_UNAUTHORIZED:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="X authorization failed. Reconnect your X account and try again.",
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=str(exc),
+    )
 
 
 @router.get("/posts", response_model=list[PostAnalyticsLatestRead])
@@ -164,7 +179,10 @@ async def refresh_post_analytics(
 
     access_token = decrypt_token(account.access_token_enc)
     api = XApiService(access_token=access_token)
-    metrics = await api.get_tweet_metrics(post.platform_post_id)
+    try:
+        metrics = await api.get_tweet_metrics(post.platform_post_id)
+    except httpx.HTTPStatusError as exc:
+        _raise_mapped_x_error(exc)
 
     snapshot = PostAnalytics(
         post_id=post.id,
@@ -187,6 +205,7 @@ async def refresh_post_analytics(
         content=post.content,
         status=post.status.value,
         is_deleted=post.is_deleted,
+        scheduled_for=post.scheduled_for,
         published_at=post.published_at,
         fetched_at=snapshot.fetched_at,
         impression_count=snapshot.impressions,
@@ -195,6 +214,8 @@ async def refresh_post_analytics(
         reply_count=snapshot.replies,
         quoted_count=snapshot.quoted_count,
         bookmarks=snapshot.bookmarks,
+        has_repost_action=post.reposted_at is not None,
+        has_quote_action=False,
     )
 
 
