@@ -98,6 +98,15 @@ class XApiService:
             _raise_for_x_status(resp)
             return resp.json()["data"]["id"]
 
+    async def delete_post(self, tweet_id: str) -> None:
+        """Delete a tweet as the authenticated user."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.delete(
+                f"{_V2_BASE}/tweets/{tweet_id}",
+                headers=self._auth_header,
+            )
+            _raise_for_x_status(resp)
+
     async def repost(self, user_id: str, tweet_id: str) -> None:
         """Repost a tweet as the authenticated user."""
         async with httpx.AsyncClient() as client:

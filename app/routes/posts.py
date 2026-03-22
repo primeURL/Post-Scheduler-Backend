@@ -275,6 +275,29 @@ async def delete_post(
     if not post or post.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
+    # Strict remote-first delete for published X posts.
+    # If X delete fails, do not soft-delete locally.
+    should_delete_on_x = (
+        post.status == PostStatus.published
+        and post.platform == "x"
+        and bool(post.platform_post_id)
+        and bool(post.connected_account_id)
+        and not post.is_deleted
+    )
+    if should_delete_on_x:
+        account = await db.get(ConnectedAccount, post.connected_account_id)
+        if not account or account.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Connected account not found for deleting post on X",
+            )
+        try:
+            access_token = await _get_valid_access_token(account, db)
+            api = XApiService(access_token=access_token)
+            await api.delete_post(post.platform_post_id)
+        except httpx.HTTPStatusError as exc:
+            _raise_mapped_x_error(exc)
+
     if not post.is_deleted:
         post.is_deleted = True
         post.deleted_at = datetime.now(timezone.utc)
