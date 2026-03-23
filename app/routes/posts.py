@@ -138,17 +138,40 @@ def _raise_mapped_x_error(exc: httpx.HTTPStatusError) -> None:
     )
 
 
+def _ensure_connected_account_for_x_publishable(
+    *,
+    platform: str,
+    status_value: PostStatus,
+    connected_account_id: uuid.UUID | None,
+) -> None:
+    if (
+        platform == "x"
+        and status_value in {PostStatus.scheduled, PostStatus.published}
+        and connected_account_id is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Connected account is required for scheduled or published X posts.",
+        )
+
+
 @router.post("", response_model=PostRead, status_code=status.HTTP_201_CREATED)
 async def create_post(
     payload: PostCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Post:
+    next_status = PostStatus.scheduled if payload.scheduled_for else PostStatus.draft
     connected_account_id = await _get_valid_connected_account(
         payload.connected_account_id,
         current_user,
         db,
         payload.platform,
+    )
+    _ensure_connected_account_for_x_publishable(
+        platform=payload.platform,
+        status_value=next_status,
+        connected_account_id=connected_account_id,
     )
 
     post = Post(
@@ -156,7 +179,7 @@ async def create_post(
         connected_account_id=connected_account_id,
         platform=payload.platform,
         content=payload.content,
-        status=PostStatus.scheduled if payload.scheduled_for else PostStatus.draft,
+        status=next_status,
         scheduled_for=payload.scheduled_for,
         thread_id=payload.thread_id,
         thread_order=payload.thread_order,
@@ -257,6 +280,17 @@ async def update_post(
             platform,
         )
 
+    next_status = update_data.get("status", post.status)
+    next_connected_account_id = update_data.get(
+        "connected_account_id",
+        post.connected_account_id,
+    )
+    _ensure_connected_account_for_x_publishable(
+        platform=platform,
+        status_value=next_status,
+        connected_account_id=next_connected_account_id,
+    )
+
     for key, value in update_data.items():
         setattr(post, key, value)
 
@@ -274,6 +308,21 @@ async def delete_post(
     post = await db.get(Post, post_id)
     if not post or post.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+
+    if (
+        post.status == PostStatus.published
+        and post.platform == "x"
+        and bool(post.platform_post_id)
+        and not post.connected_account_id
+        and not post.is_deleted
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Cannot delete this X post because it is missing a connected account link. "
+                "Reconnect your X account or re-link this post first."
+            ),
+        )
 
     # Strict remote-first delete for published X posts.
     # If X delete fails, do not soft-delete locally.
