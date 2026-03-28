@@ -6,9 +6,11 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
+from app.core.job_types import close_arq_pool
 from app.core.firebase import init_firebase
 from app.core.limiter import limiter
 from app.core.redis import close_redis, init_redis
+from app.core.reconciler import reconcile_analytics_jobs, reconcile_publish_jobs
 from app.core.scheduler import scheduler
 from app.db.init_db import close_db, init_db
 from app.jobs.analytics import fetch_published_analytics
@@ -17,6 +19,7 @@ from app.routes.accounts import router as accounts_router
 from app.routes.analytics import router as analytics_router
 from app.routes.auth import router as auth_router
 from app.routes.health import router as health_router
+from app.routes.jobs import router as jobs_router
 from app.routes.posts import router as posts_router
 from app.routes.storage import router as storage_router
 
@@ -26,12 +29,29 @@ async def lifespan(_: FastAPI):
     init_firebase()
     await init_db()
     await init_redis()
-    scheduler.add_job(publish_due_posts, "interval", seconds=60, id="publisher")
+    if settings.enable_legacy_publisher:
+        scheduler.add_job(publish_due_posts, "interval", seconds=60, id="publisher")
     scheduler.add_job(recover_stale_publishing, "interval", minutes=10, id="stale_recovery")
-    scheduler.add_job(fetch_published_analytics, "interval", hours=6, id="analytics_fetch")
+    if settings.enable_legacy_analytics:
+        scheduler.add_job(fetch_published_analytics, "interval", hours=6, id="analytics_fetch")
+
+    if settings.enable_reconciler:
+        scheduler.add_job(
+            reconcile_publish_jobs,
+            "interval",
+            seconds=settings.reconciler_publish_interval_seconds,
+            id="reconcile_publish",
+        )
+        scheduler.add_job(
+            reconcile_analytics_jobs,
+            "interval",
+            seconds=settings.reconciler_analytics_interval_seconds,
+            id="reconcile_analytics",
+        )
     scheduler.start()
     yield
     scheduler.shutdown(wait=False)
+    await close_arq_pool()
     await close_db()
     await close_redis()
 
@@ -63,4 +83,5 @@ app.include_router(auth_router)
 app.include_router(accounts_router)
 app.include_router(posts_router)
 app.include_router(analytics_router)
+app.include_router(jobs_router)
 app.include_router(storage_router)

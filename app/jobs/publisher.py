@@ -18,6 +18,12 @@ logger = logging.getLogger(__name__)
 _STALE_THRESHOLD = timedelta(minutes=10)
 _TOKEN_REFRESH_BUFFER = timedelta(minutes=5)
 
+_PERMANENT_PUBLISH_MESSAGES = (
+    "No connected account linked to post",
+    "missing media.write scope",
+    "no refresh token is available",
+)
+
 
 async def publish_due_posts() -> None:
     """Claim all posts due now and publish them.
@@ -56,15 +62,15 @@ async def publish_due_posts() -> None:
         posts = rows.scalars().all()
 
     for post in posts:
-        await _publish_one(post.id)
+        await publish_single_post(post.id)
 
 
-async def _publish_one(post_id) -> None:
-    """Attempt to publish one claimed post; write outcome back to DB."""
+async def publish_single_post(post_id) -> tuple[str, str | None, bool, str | None]:
+    """Attempt to publish one post and return status with retry metadata."""
     async with async_session_factory() as session:
         post = await session.get(Post, post_id)
         if not post:
-            return
+            return (PostStatus.failed.value, "post not found", False, "POST_NOT_FOUND")
 
         account: ConnectedAccount | None = None
         if post.connected_account_id:
@@ -118,8 +124,37 @@ async def _publish_one(post_id) -> None:
             logger.exception("Failed to publish post %s: %s", post_id, exc)
             post.status = PostStatus.failed
             post.error_message = str(exc)
+            retryable, error_code = _classify_publish_error(exc)
+            await session.commit()
+            return (post.status.value, post.error_message, retryable, error_code)
 
         await session.commit()
+        return (post.status.value, post.error_message, True, None)
+
+
+def _classify_publish_error(exc: Exception) -> tuple[bool, str]:
+    """Classify publish failures into retryable vs permanent."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code == 429 or code >= 500:
+            return (True, f"HTTP_{code}")
+        if code in (400, 401, 403, 404):
+            return (False, f"HTTP_{code}")
+        return (True, f"HTTP_{code}")
+
+    if isinstance(exc, (httpx.TimeoutException, httpx.RequestError)):
+        return (True, "NETWORK_ERROR")
+
+    msg = str(exc)
+    for marker in _PERMANENT_PUBLISH_MESSAGES:
+        if marker in msg:
+            return (False, "AUTH_OR_ACCOUNT_CONFIGURATION")
+
+    # Thread predecessor might be published shortly after; retry this case.
+    if "Thread predecessor" in msg:
+        return (True, "THREAD_PREDECESSOR_NOT_READY")
+
+    return (True, "UNKNOWN")
 
 
 async def _get_valid_access_token(account: ConnectedAccount, session) -> str:

@@ -47,6 +47,21 @@ class Settings(BaseSettings):
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"
 
+    # --- Durable jobs (ARQ + reconciler) ---
+    # Keep legacy APScheduler execution enabled until cutover is complete.
+    enable_legacy_publisher: bool = True
+    enable_legacy_analytics: bool = True
+    enable_reconciler: bool = False
+    enable_arq_enqueue: bool = False
+    arq_redis_url: str = "redis://localhost:6379/1"
+    arq_job_timeout_seconds: int = 120
+    arq_max_tries: int = 5
+    reconciler_publish_interval_seconds: int = 30
+    reconciler_analytics_interval_seconds: int = 21600
+    reconciler_lock_ttl_seconds: int = 90
+    reconciler_publish_lock_key: str = "reconciler:publish:lock"
+    reconciler_analytics_lock_key: str = "reconciler:analytics:lock"
+
     # --- Cloudflare R2 ---
     r2_account_id: str = ""
     r2_access_key_id: str = ""
